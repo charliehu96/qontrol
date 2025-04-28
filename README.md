@@ -18,6 +18,6 @@ The goal is to streamline testing by providing a more efficient and user-friendl
 - Python 3.7+
 - PyQt5
 
-## Installation
+## Required Installation
 ```bash
 pip install PyQt5
