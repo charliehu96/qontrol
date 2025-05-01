@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 
-diimport sys, time
+import sys
+import time
+import logging
 from PyQt5 import QtCore, QtWidgets, QtGui
 import qontrol
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+
+# ------------------ Logging Configuration ------------------
+logging.basicConfig(level=logging.DEBUG,
+                    format='[%(asctime)s] %(levelname)s:%(name)s: %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S')
+logger = logging.getLogger('QontrolGUI')
 
 # ------------------ Channel Card Widget ------------------
 class ChannelCard(QtWidgets.QFrame):
@@ -12,255 +20,372 @@ class ChannelCard(QtWidgets.QFrame):
         super().__init__(*args, **kwargs)
         self.channel = channel
         self.driver = driver
+        logger.debug(f"Initialized ChannelCard for channel {channel}")
 
-        self.setObjectName("channelCard")
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setSpacing(6)
-        self.layout.setContentsMargins(8, 8, 8, 8)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(8, 8, 8, 8)
 
         # Channel label
         self.title_label = QtWidgets.QLabel(f"Ch {channel:02d}")
-        bold = QtGui.QFont("Segoe UI", 10, QtGui.QFont.Bold)
-        self.title_label.setFont(bold)
-        self.layout.addWidget(self.title_label, alignment=QtCore.Qt.AlignCenter)
+        font = QtGui.QFont("Segoe UI", 10, QtGui.QFont.Bold)
+        self.title_label.setFont(font)
+        layout.addWidget(self.title_label, alignment=QtCore.Qt.AlignCenter)
 
-        # Display
-        self.current_label = QtWidgets.QLabel("0.00 mA")
-        self.current_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.layout.addWidget(self.current_label)
+        # Voltage display
+        self.voltage_label = QtWidgets.QLabel("0.00 V")
+        self.voltage_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.voltage_label)
 
-        # Input
+        # Input for new voltage
         self.input_field = QtWidgets.QLineEdit()
-        self.input_field.setPlaceholderText("Enter mA")
-        self.layout.addWidget(self.input_field)
+        self.input_field.setPlaceholderText("Enter V")
+        layout.addWidget(self.input_field)
 
         # Buttons
-        btns = QtWidgets.QHBoxLayout()
+        btn_layout = QtWidgets.QHBoxLayout()
         self.set_button = QtWidgets.QPushButton("Set")
         self.get_button = QtWidgets.QPushButton("Get Reading")
-        btns.addWidget(self.set_button)
-        btns.addWidget(self.get_button)
-        self.layout.addLayout(btns)
+        btn_layout.addWidget(self.set_button)
+        btn_layout.addWidget(self.get_button)
+        layout.addLayout(btn_layout)
 
-        # Connect
-        self.set_button.clicked.connect(self.apply_current)
+        # Connect signals
+        self.set_button.clicked.connect(self.apply_voltage)
         self.get_button.clicked.connect(self.get_reading)
 
         # Styles
         self.base_style = """
-            QFrame { background: #F7F7F7; border:1px solid #CCC; border-radius:8px; }
-            QLabel { font:10pt 'Segoe UI'; color:#333; }
-            QLineEdit { background:#fff; border:1px solid #CCC; border-radius:4px; padding:4px; }
-            QPushButton { background:#0078D7; color:#fff; border:none; border-radius:4px; padding:6px; font:10pt 'Segoe UI'; }
-            QPushButton:hover { background:#005FB8; }
+            QFrame { background: #F7F7F7; border: 1px solid #CCC; border-radius: 8px; }
+            QLabel { font: 10pt 'Segoe UI'; color: #333; }
+            QLineEdit { background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 4px; }
+            QPushButton { background: #0078D7; color: #fff; border: none; border-radius: 4px; padding: 6px; font: 10pt 'Segoe UI'; font-weight: 600; }
+            QPushButton:hover { background: #005FB8; }
         """
-        self.success_style = self.base_style + "QFrame { background:#E0F2E9; border:1px solid #A5D6A7; }"
-        self.error_style   = self.base_style + "QFrame { background:#FFE5E5; border:1px solid #FFAAAA; }"
+        self.success_style = self.base_style + "QFrame { background: #E0F2E9; border: 1px solid #A5D6A7; }"
+        self.error_style   = self.base_style + "QFrame { background: #FFE5E5; border: 1px solid #FFAAAA; }"
         self.setStyleSheet(self.base_style)
 
-    def update_current_display(self):
-        val = self.driver.i[self.channel]
-        self.current_label.setText(f"{val:.2f} mA")
-
-    def apply_current(self):
+    def apply_voltage(self):
+        """Send the new voltage to the hardware and confirm."""
         try:
-            val = float(self.input_field.text())
-            self.driver.i[self.channel] = val
-            self.update_current_display()
+            v = float(self.input_field.text())
+            logger.debug(f"Applying voltage: setting channel {self.channel} to {v} V")
+            # Use array syntax for voltage
+            self.driver.v[self.channel] = v
+            # Read back to confirm
+            confirmed = self.driver.v[self.channel]
+            logger.debug(f"Confirmed channel {self.channel} voltage: {confirmed} V")
+            self.voltage_label.setText(f"{confirmed:.2f} V")
             self.setStyleSheet(self.success_style)
-        except ValueError:
+        except Exception as e:
+            logger.error(f"Error applying voltage to channel {self.channel}: {e}")
             self.setStyleSheet(self.error_style)
-        QtCore.QTimer.singleShot(1000, lambda: self.setStyleSheet(self.base_style))
+        finally:
+            QtCore.QTimer.singleShot(1000, lambda: self.setStyleSheet(self.base_style))
 
     def get_reading(self):
-        val = self.driver.i[self.channel]
-        self.current_label.setText(f"{val:.2f} mA")
-        self.setStyleSheet(self.success_style)
-        QtCore.QTimer.singleShot(800, lambda: self.setStyleSheet(self.base_style))
+        """Fetch the voltage reading from the hardware."""
+        try:
+            v = self.driver.v[self.channel]
+            logger.debug(f"Reading channel {self.channel}: {v} V")
+            self.voltage_label.setText(f"{v:.2f} V")
+            self.setStyleSheet(self.success_style)
+        except Exception as e:
+            logger.error(f"Error reading channel {self.channel}: {e}")
+            self.setStyleSheet(self.error_style)
+        finally:
+            QtCore.QTimer.singleShot(800, lambda: self.setStyleSheet(self.base_style))
 
-
-# -------------- Functions Window ---------------
+# ------------------ Functions Window ------------------
 class FunctionsWindow(QtWidgets.QDialog):
     def __init__(self, driver, parent=None):
         super().__init__(parent)
         self.driver = driver
-        self.main_win = parent
-        self.active = None
+        self.main = parent
         self.setWindowTitle("Functions")
-        self.resize(600,400)
-        self.layout = QtWidgets.QVBoxLayout(self)
+        self.resize(600, 400)
+        self.setStyleSheet("background: #F7F7F7; font-family: 'Segoe UI'; color: #333;")
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         # Channel selector
-        self.layout.addWidget(QtWidgets.QLabel("Select Channel:"))
+        layout.addWidget(QtWidgets.QLabel("Select Channel:"))
         self.combo = QtWidgets.QComboBox()
-        for ch in range(1,61):
+        self.combo.setStyleSheet("QComboBox:hover { background: #e6e6e6; }")
+        for ch in range(1, self.driver.n_chs+1):
             self.combo.addItem(f"Ch {ch:02d}")
-        self.combo.setStyleSheet("QComboBox:hover{background:#e6e6e6}")
-        self.layout.addWidget(self.combo)
+        layout.addWidget(self.combo)
 
-        # Toggle
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel("Toggle mA:"))
-        self.t_in = QtWidgets.QLineEdit(); self.t_in.setFixedWidth(80)
-        row.addWidget(self.t_in)
-        self.t_btn = QtWidgets.QPushButton("Toggle"); self.t_btn.setCheckable(True)
-        self.t_btn.toggled.connect(self.toggle_current)
-        row.addWidget(self.t_btn)
-        self.layout.addLayout(row)
+        # Toggle controls
+        t_layout = QtWidgets.QHBoxLayout()
+        t_layout.addWidget(QtWidgets.QLabel("Toggle V:"))
+        self.toggle_input = QtWidgets.QLineEdit()
+        self.toggle_input.setPlaceholderText("Enter V")
+        self.toggle_input.setFixedWidth(80)
+        t_layout.addWidget(self.toggle_input)
+        self.toggle_button = QtWidgets.QPushButton("Toggle")
+        self.toggle_button.setCheckable(True)
+        t_layout.addWidget(self.toggle_button)
+        layout.addLayout(t_layout)
 
-        self.t_timer = QtCore.QTimer(self); self.t_timer.setInterval(1)
-        self.t_timer.timeout.connect(self._do_toggle)
-        self.t_state=False; self.t_val=0.0
+        # Ramp controls
+        r_layout = QtWidgets.QHBoxLayout()
+        r_layout.addWidget(QtWidgets.QLabel("Ramp Max V:"))
+        self.ramp_max_input = QtWidgets.QLineEdit()
+        self.ramp_max_input.setPlaceholderText("Max V")
+        self.ramp_max_input.setFixedWidth(80)
+        r_layout.addWidget(self.ramp_max_input)
+        r_layout.addWidget(QtWidgets.QLabel("Duration (ms):"))
+        self.ramp_dur_input = QtWidgets.QLineEdit()
+        self.ramp_dur_input.setPlaceholderText("ms")
+        self.ramp_dur_input.setFixedWidth(80)
+        r_layout.addWidget(self.ramp_dur_input)
+        self.ramp_button = QtWidgets.QPushButton("Ramp")
+        r_layout.addWidget(self.ramp_button)
+        layout.addLayout(r_layout)
 
-        # Ramp
-        row2 = QtWidgets.QHBoxLayout()
-        row2.addWidget(QtWidgets.QLabel("Ramp Max mA:"))
-        self.r_in = QtWidgets.QLineEdit(); self.r_in.setFixedWidth(80)
-        row2.addWidget(self.r_in)
-        row2.addWidget(QtWidgets.QLabel("Duration(ms):"))
-        self.d_in = QtWidgets.QLineEdit(); self.d_in.setFixedWidth(80)
-        row2.addWidget(self.d_in)
-        self.r_btn = QtWidgets.QPushButton("Ramp"); self.r_btn.clicked.connect(self.start_ramp)
-        row2.addWidget(self.r_btn)
-        self.layout.addLayout(row2)
+        # Real-time plot setup
+        self.start_time = time.time()
+        self.time_data = []
+        self.voltage_data = []
+        fig = Figure()
+        self.canvas = FigureCanvas(fig)
+        self.ax = fig.add_subplot(111)
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Voltage (V)")
+        layout.addWidget(self.canvas)
 
-        self.r_timer = QtCore.QTimer(self); self.r_timer.timeout.connect(self._do_ramp)
-        self.r_steps=10
+        # Timers
+        self.toggle_timer = QtCore.QTimer(self)
+        self.toggle_timer.setInterval(1)
+        self.ramp_timer = QtCore.QTimer(self)
+        self.auto_timer = QtCore.QTimer(self)
+        self.auto_timer.setInterval(200)
 
-        # Plot
-        self.start_t = time.time(); self.x=[]; self.y=[]
-        self.fig = Figure(); self.canvas=FigureCanvas(self.fig)
-        self.ax=self.fig.add_subplot(111)
-        self.ax.set_xlabel("Time (s)"); self.ax.set_ylabel("Current (mA)")
-        self.layout.addWidget(self.canvas)
+        # Connect signals
+        self.toggle_button.toggled.connect(self.toggle_voltage)
+        self.toggle_timer.timeout.connect(self.perform_toggle)
+        self.ramp_button.clicked.connect(self.start_ramp)
+        self.ramp_timer.timeout.connect(self.perform_ramp)
+        self.auto_timer.timeout.connect(self._auto_update)
 
-        # update timer for both reading & plot
-        self.au_timer = QtCore.QTimer(self); self.au_timer.setInterval(200)
-        self.au_timer.timeout.connect(self._auto_update)
+        # Internal state
+        self.active_channel = None
+        self.toggle_state = False
 
-    def get_chan(self):
+    def get_selected_channel(self):
         return int(self.combo.currentText().split()[1])
 
-    def _auto_update(self):
-        # refresh display
-        if not self.active: return
-        for c in self.main_win.channel_cards:
-            if c.channel==self.active:
-                old=c.current_label.text(); c.update_current_display();
-                if c.current_label.text()!=old:
-                    c.setStyleSheet(c.success_style)
-                    QtCore.QTimer.singleShot(800, lambda w=c: w.setStyleSheet(w.base_style))
-                break
-        # plot
-        t=time.time()-self.start_t; v=self.driver.i[self.active]
-        self.x.append(t); self.y.append(v)
-        self.ax.clear(); self.ax.plot(self.x,self.y)
-        self.ax.set_xlabel("Time (s)"); self.ax.set_ylabel("Current (mA)")
-        self.canvas.draw()
-
-    def toggle_current(self, chk):
-        ch=self.get_chan(); self.active=ch
-        if chk:
-            self.t_btn.setText("Toggle(On)")
-            try: self.t_val=float(self.t_in.text())
-            except: self.t_val=0.0
-            self.t_state=False; self.t_timer.start(); self.au_timer.start()
+    def toggle_voltage(self, checked):
+        ch = self.get_selected_channel()
+        self.active_channel = ch
+        if checked:
+            try:
+                self.toggle_value = float(self.toggle_input.text())
+            except ValueError:
+                self.toggle_value = 0.0
+            self.toggle_state = False
+            logger.debug(f"Starting toggle on channel {ch} with {self.toggle_value} V")
+            self.toggle_timer.start()
+            self.auto_timer.start()
+            self.toggle_button.setText("Toggle (On)")
         else:
-            self.t_btn.setText("Toggle"); self.t_timer.stop(); self.driver.i[ch]=0; self.au_timer.stop()
+            logger.debug(f"Stopping toggle on channel {ch}")
+            self.toggle_timer.stop()
+            self.auto_timer.stop()
+            self.driver.v[ch] = 0
+            self.toggle_button.setText("Toggle")
 
-    def _do_toggle(self):
-        ch=self.active
-        self.driver.i[ch] = (0 if self.t_state else self.t_val)
-        self.t_state=not self.t_state
+    def perform_toggle(self):
+        ch = self.active_channel
+        v = self.toggle_value if not self.toggle_state else 0
+        logger.debug(f"Toggling channel {ch} to {v} V")
+        self.driver.v[ch] = v
+        self.toggle_state = not self.toggle_state
 
     def start_ramp(self):
-        ch=self.get_chan(); self.active=ch
-        try: mx=float(self.r_in.text())
-        except: mx=0.0
-        try: dur=float(self.d_in.text())
-        except: dur=1000.0
-        step=mx/self.r_steps; interval=dur/self.r_steps
-        self.cur=0; self.cnt=0
-        self.r_timer.setInterval(int(interval))
-        self.driver.i[ch]=0; self.r_timer.start(); self.au_timer.start(); self.step=step
+        ch = self.get_selected_channel()
+        self.active_channel = ch
+        try:
+            max_v = float(self.ramp_max_input.text())
+        except ValueError:
+            max_v = 0.0
+        try:
+            duration = float(self.ramp_dur_input.text())
+        except ValueError:
+            duration = 1000.0
+        steps = 10
+        self.step_value = max_v / steps
+        interval = duration / steps
+        self.current_step = 0
+        logger.debug(f"Starting ramp on channel {ch}: max {max_v} V over {duration} ms")
+        self.ramp_timer.setInterval(int(interval))
+        self.ramp_timer.start()
+        self.auto_timer.start()
 
-    def _do_ramp(self):
-        self.cnt+=1; self.cur+=self.step; ch=self.active
-        if self.cnt<=self.r_steps:
-            self.driver.i[ch]=self.cur
+    def perform_ramp(self):
+        ch = self.active_channel
+        self.current_step += 1
+        value = self.current_step * self.step_value
+        if self.current_step <= 10:
+            logger.debug(f"Ramping channel {ch} to {value} V (step {self.current_step})")
+            self.driver.v[ch] = value
         else:
-            self.r_timer.stop(); self.au_timer.stop()
+            logger.debug(f"Ramp complete on channel {ch}")
+            self.ramp_timer.stop()
+            self.auto_timer.stop()
 
+    def _auto_update(self):
+        if self.active_channel is None:
+            return
+        # Update main window display
+        for card in self.main.cards:
+            if card.channel == self.active_channel:
+                old = card.voltage_label.text()
+                new_val = self.driver.v[self.active_channel]
+                new = f"{new_val:.2f} V"
+                card.voltage_label.setText(new)
+                if old != new:
+                    logger.debug(f"Channel {self.active_channel} updated to {new}")
+                    card.setStyleSheet(card.success_style)
+                    QtCore.QTimer.singleShot(800, lambda w=card: w.setStyleSheet(w.base_style))
+                break
+        # Plot update
+        t = time.time() - self.start_time
+        self.time_data.append(t)
+        self.voltage_data.append(self.driver.v[self.active_channel])
+        self.ax.clear()
+        self.ax.plot(self.time_data, self.voltage_data)
+        self.canvas.draw()
 
 # ------------------ Main Application Window ------------------
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Qontrol GUI")
-        self.setStyleSheet("background:white;")
-        self.driver = qontrol.QXOutput(serial_port_name="YOUR_SERIAL_PORT")
-        self.channel_cards=[]
-        w=QtWidgets.QWidget(); self.setCentralWidget(w)
-        v=QtWidgets.QVBoxLayout(w); v.setSpacing(10); v.setContentsMargins(10,10,10,10)
+        self.setStyleSheet("background: white;")
 
-        # grid
-        gw=QtWidgets.QWidget(); self.gl=QtWidgets.QGridLayout(gw)
-        self.gl.setSpacing(10); self.gl.setContentsMargins(0,0,0,0)
-        v.addWidget(gw,1)
-        for ch in range(1,61):
-            self.channel_cards.append(ChannelCard(ch,self.driver))
-        self._layout_grid()
+        # Initialize driver with response_timeout
+        serial_port = "YOUR_SERIAL_PORT"
+        self.driver = qontrol.QXOutput(serial_port_name=serial_port, response_timeout=0.1)
+        logger.info(f"Qontrol '{self.driver.device_id}' initialized with firmware {self.driver.firmware} and {self.driver.n_chs} channels")
 
-        # bottom bar
-        bb=QtWidgets.QWidget(); bb.setFixedHeight(50)
-        bl=QtWidgets.QGridLayout(bb); bl.setContentsMargins(0,0,0,0); bl.setSpacing(10)
-        for i in range(4): bl.setColumnStretch(i,1)
-        btns=[("Global mA:",True),("Get All Readings",False),("Functions",False),("Exit",False)]
-        # Global
-        c0=QtWidgets.QWidget(); l0=QtWidgets.QHBoxLayout(c0); l0.setSpacing(5)
-        lbl=QtWidgets.QLabel("Global mA:"); l0.addWidget(lbl)
-        self.ginput=QtWidgets.QLineEdit(); self.ginput.setPlaceholderText("Enter global mA"); l0.addWidget(self.ginput)
-        b0=QtWidgets.QPushButton("Set All Currents"); b0.clicked.connect(self._set_all); l0.addWidget(b0); bl.addWidget(c0,0,0)
-        # Get All
-        b1=QtWidgets.QPushButton("Get All Readings"); b1.clicked.connect(self._get_all); bl.addWidget(b1,0,1)
-        # Func
-        b2=QtWidgets.QPushButton("Functions"); b2.clicked.connect(self._open_funcs); bl.addWidget(b2,0,2)
-        # Exit
-        b3=QtWidgets.QPushButton("Exit"); b3.clicked.connect(QtWidgets.qApp.quit); bl.addWidget(b3,0,3)
-        v.addWidget(bb,0)
+        # Central widget and layout
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
+        main_layout = QtWidgets.QVBoxLayout(central)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
+        # Channel grid
+        grid_widget = QtWidgets.QWidget()
+        self.grid_layout = QtWidgets.QGridLayout(grid_widget)
+        self.grid_layout.setSpacing(10)
+        self.grid_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(grid_widget, 1)
+
+        self.cards = []
+        for ch in range(1, self.driver.n_chs + 1):
+            card = ChannelCard(ch, self.driver)
+            self.cards.append(card)
+        self.responsive_layout()
+
+        # Bottom controls
+        main_layout.addWidget(self._build_bottom_controls(), 0)
+
+        # Show fullscreen
         self.showFullScreen()
 
-    def _layout_grid(self):
-        w=self.width(); cols=10 if w>1800 else 8 if w>1200 else 6
-        while self.gl.count():
-            i=self.gl.takeAt(0)
-            if i.widget(): i.widget().setParent(None)
-        for idx,card in enumerate(self.channel_cards):
-            self.gl.addWidget(card,idx//cols,idx%cols)
+    def _build_bottom_controls(self):
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QGridLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        for i in range(4): layout.setColumnStretch(i, 1)
 
-    def resizeEvent(self,e):
-        self._layout_grid(); super().resizeEvent(e)
+        btn_style = (
+            "background:#0078D7;color:white;border:none; border-radius:4px; padding:6px;"
+            "font:10pt 'Segoe UI'; font-weight:600;"
+        )
+        # Column 0: Global set
+        w0 = QtWidgets.QWidget(); l0 = QtWidgets.QHBoxLayout(w0)
+        l0.setContentsMargins(0, 0, 0, 0); l0.setSpacing(5)
+        l0.addWidget(QtWidgets.QLabel("Global V:"))
+        self.global_input = QtWidgets.QLineEdit()
+        self.global_input.setPlaceholderText("Enter global V")
+        self.global_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        l0.addWidget(self.global_input)
+        btn0 = QtWidgets.QPushButton("Set All Voltages"); btn0.setStyleSheet(btn_style)
+        btn0.clicked.connect(self.set_all)
+        l0.addWidget(btn0)
+        layout.addWidget(w0, 0, 0)
 
-    def _set_all(self):
-        try: v=float(self.ginput.text())
-        except: return
-        self.driver.i[:]=v
-        for c in self.channel_cards:
-            c.update_current_display(); c.setStyleSheet(c.success_style)
-            QtCore.QTimer.singleShot(800,lambda w=c: w.setStyleSheet(w.base_style))
+        # Column 1: Get all readings
+        w1 = QtWidgets.QWidget(); l1 = QtWidgets.QHBoxLayout(w1)
+        l1.setContentsMargins(0, 0, 0, 0)
+        btn1 = QtWidgets.QPushButton("Get All Readings"); btn1.setStyleSheet(btn_style)
+        btn1.clicked.connect(self.get_all)
+        l1.addWidget(btn1); layout.addWidget(w1, 0, 1)
 
-    def _get_all(self):
-        for c in self.channel_cards: c.get_reading()
+        # Column 2: Functions
+        w2 = QtWidgets.QWidget(); l2 = QtWidgets.QHBoxLayout(w2)
+        l2.setContentsMargins(0, 0, 0, 0)
+        btn2 = QtWidgets.QPushButton("Functions"); btn2.setStyleSheet(btn_style)
+        btn2.clicked.connect(self.open_functions)
+        l2.addWidget(btn2); layout.addWidget(w2, 0, 2)
 
-    def _open_funcs(self):
-        self.fw=FunctionsWindow(self.driver,self); self.fw.show()
+        # Column 3: Exit
+        w3 = QtWidgets.QWidget(); l3 = QtWidgets.QHBoxLayout(w3)
+        l3.setContentsMargins(0, 0, 0, 0)
+        btn3 = QtWidgets.QPushButton("Exit"); btn3.setStyleSheet(btn_style)
+        btn3.clicked.connect(QtWidgets.qApp.quit)
+        l3.addWidget(btn3); layout.addWidget(w3, 0, 3)
 
+        return container
 
+    def set_all(self):
+        try:
+            v = float(self.global_input.text())
+            logger.debug(f"Bulk setting all channels to {v} V")
+            self.driver.v[:] = v
+            for card in self.cards:
+                card.voltage_label.setText(f"{v:.2f} V")
+                card.setStyleSheet(card.success_style)
+                QtCore.QTimer.singleShot(800, lambda w=card: w.setStyleSheet(w.base_style))
+        except Exception as e:
+            logger.error(f"Error bulk setting voltages: {e}")
+
+    def get_all(self):
+        logger.debug("Manual bulk read of all channels")
+        for card in self.cards:
+            card.get_reading()
+
+    def open_functions(self):
+        self.func_win = FunctionsWindow(self.driver, self)
+        self.func_win.show()
+
+    def responsive_layout(self):
+        width = self.width()
+        cols = 10 if width > 1800 else 8 if width > 1200 else 6
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item.widget(): item.widget().setParent(None)
+        for idx, card in enumerate(self.cards):
+            self.grid_layout.addWidget(card, idx // cols, idx % cols)
+
+    def resizeEvent(self, event):
+        self.responsive_layout()
+        super().resizeEvent(event)
+
+# ------------------ Entry Point ------------------
 def main():
-    app=QtWidgets.QApplication(sys.argv)
-    app.setFont(QtGui.QFont("Segoe UI",10))
-    mw=MainWindow(); mw.show(); sys.exit(app.exec_())
+    app = QtWidgets.QApplication(sys.argv)
+    app.setFont(QtGui.QFont("Segoe UI", 10))
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec_())
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()
