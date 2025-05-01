@@ -90,6 +90,7 @@ class ChannelCard(QtWidgets.QFrame):
         self.setStyleSheet(self.base_card_style)
 
     def update_current_display(self):
+        # Only called when explicitly requested
         current = self.driver.i[self.channel]
         self.current_label.setText(f"{current:.2f} mA")
 
@@ -104,6 +105,7 @@ class ChannelCard(QtWidgets.QFrame):
         QtCore.QTimer.singleShot(1000, lambda: self.setStyleSheet(self.base_card_style))
 
     def get_reading(self):
+        # Manual refresh triggered by button
         val = self.driver.i[self.channel]
         self.current_label.setText(f"{val:.2f} mA")
         self.setStyleSheet(self.success_card_style)
@@ -120,7 +122,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # instantiate the real Qontrol driver
         self.driver = qontrol.QXOutput(serial_port_name="YOUR_SERIAL_PORT")
 
-        # prepare layouts BEFORE fullscreen
+        # Layout setup BEFORE fullscreen
         self.channel_cards = []
         self.central_widget = QtWidgets.QWidget()
         self.setCentralWidget(self.central_widget)
@@ -139,7 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.channel_cards.append(ChannelCard(ch, self.driver))
         self.responsive_layout()
 
-        # bottom controls (global set, get all, functions, exit)
+        # Bottom controls (global set, get all, functions, exit)
         self.bottom_widget = QtWidgets.QWidget()
         self.bottom_widget.setMinimumHeight(50)
         bottom_layout = QtWidgets.QGridLayout(self.bottom_widget)
@@ -201,18 +203,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.main_layout.addWidget(self.bottom_widget, 0)
 
-        # refresh timer
-        self.timer = QtCore.QTimer(self)
-        self.timer.timeout.connect(self.update_all_channel_displays)
-        self.timer.start(1000)
-
-        # go fullscreen
-        self.showFullScreen()
-
-    def update_all_channel_displays(self):
-        for card in self.channel_cards:
-            card.update_current_display()
-
     def set_all_currents(self):
         try:
             val = float(self.all_current_input.text())
@@ -225,6 +215,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
 
     def get_all_readings(self):
+        # Manual bulk refresh; no automatic polling
         for card in self.channel_cards:
             card.get_reading()
 
@@ -256,7 +247,6 @@ def main():
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
-
 
 if __name__ == '__main__':
     main()
