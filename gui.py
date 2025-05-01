@@ -1,22 +1,7 @@
 import sys
 from PyQt5 import QtCore, QtWidgets, QtGui
+import qontrol
 from functions_window import FunctionsWindow  # Import the functions window
-
-# ------------------ Mock Qontrol Device Driver ------------------
-class QontrolDriver:
-    def __init__(self):
-        # Initialize 60 channels for current (i)
-        self.i = {ch: 0.0 for ch in range(1, 61)}
-
-    def set_current(self, ch, value):
-        self.i[ch] = value
-
-    def get_current(self, ch):
-        return self.i[ch]
-
-    def toggle_current(self, ch, value):
-        # Used for toggling: set current to value or to 0.
-        self.i[ch] = value
 
 # ------------------ Channel Card Widget ------------------
 class ChannelCard(QtWidgets.QFrame):
@@ -28,7 +13,7 @@ class ChannelCard(QtWidgets.QFrame):
         self.setObjectName("channelCard")
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setSpacing(6)
-        self.layout.setContentsMargins(8,8,8,8)
+        self.layout.setContentsMargins(8, 8, 8, 8)
 
         # Bold channel label.
         self.title_label = QtWidgets.QLabel(f"Ch {channel:02d}")
@@ -58,7 +43,7 @@ class ChannelCard(QtWidgets.QFrame):
         self.set_button.clicked.connect(self.apply_current)
         self.get_button.clicked.connect(self.get_reading)
 
-        # Inline CSS for styling.
+        # Styles
         self.base_card_style = """
             QFrame {
                 background-color: #F7F7F7;
@@ -94,28 +79,24 @@ class ChannelCard(QtWidgets.QFrame):
             QFrame {
                 background-color: #E0F2E9;
                 border: 1px solid #A5D6A7;
-                border-radius: 8px;
             }
         """
         self.error_card_style = self.base_card_style + """
             QFrame {
                 background-color: #FFE5E5;
                 border: 1px solid #FFAAAA;
-                border-radius: 8px;
             }
         """
         self.setStyleSheet(self.base_card_style)
 
     def update_current_display(self):
-        """Update the current label."""
-        current = self.driver.get_current(self.channel)
-        self.current_label.setText("{:.2f} mA".format(current))
+        current = self.driver.i[self.channel]
+        self.current_label.setText(f"{current:.2f} mA")
 
     def apply_current(self):
-        """Read input and update the current."""
         try:
-            new_value = float(self.input_field.text())
-            self.driver.set_current(self.channel, new_value)
+            val = float(self.input_field.text())
+            self.driver.i[self.channel] = val
             self.update_current_display()
             self.setStyleSheet(self.success_card_style)
         except ValueError:
@@ -123,123 +104,120 @@ class ChannelCard(QtWidgets.QFrame):
         QtCore.QTimer.singleShot(1000, lambda: self.setStyleSheet(self.base_card_style))
 
     def get_reading(self):
-        """Update the display with current reading."""
-        current = self.driver.get_current(self.channel)
-        self.current_label.setText("{:.2f} mA".format(current))
+        val = self.driver.i[self.channel]
+        self.current_label.setText(f"{val:.2f} mA")
         self.setStyleSheet(self.success_card_style)
         QtCore.QTimer.singleShot(800, lambda: self.setStyleSheet(self.base_card_style))
+
 
 # ------------------ Main Application Window ------------------
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Qontrol GUI")
-        self.showFullScreen()  # Launch fullscreen
         self.setStyleSheet("background-color: white;")
-        self.driver = QontrolDriver()
-        self.channel_cards = []
 
-        # Central widget and vertical layout.
+        # instantiate the real Qontrol driver
+        self.driver = qontrol.QXOutput(serial_port_name="YOUR_SERIAL_PORT")
+
+        # prepare layouts BEFORE fullscreen
+        self.channel_cards = []
         self.central_widget = QtWidgets.QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QtWidgets.QVBoxLayout(self.central_widget)
         self.main_layout.setSpacing(10)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Container for the grid of channels (no scrolling).
+        # grid of channel cards
         self.grid_widget = QtWidgets.QWidget()
         self.grid_layout = QtWidgets.QGridLayout(self.grid_widget)
         self.grid_layout.setSpacing(10)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.addWidget(self.grid_widget, 1)
 
-        # Create 60 channel cards.
         for ch in range(1, 61):
-            card = ChannelCard(ch, self.driver)
-            self.channel_cards.append(card)
+            self.channel_cards.append(ChannelCard(ch, self.driver))
         self.responsive_layout()
 
-        # --- Bottom Control Area: 4 Equal Columns ---
+        # bottom controls (global set, get all, functions, exit)
         self.bottom_widget = QtWidgets.QWidget()
         self.bottom_widget.setMinimumHeight(50)
         bottom_layout = QtWidgets.QGridLayout(self.bottom_widget)
-        bottom_layout.setContentsMargins(0,0,0,0)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(10)
         for col in range(4):
             bottom_layout.setColumnStretch(col, 1)
 
-        # Inline style for buttons.
-        btn_style = ("background-color: #0078D7; color: white; border: none; border-radius: 4px; "
-                     "padding: 6px; font: 10pt 'Segoe UI'; font-weight: 600;")
-
-        # Column 0: Global mA input and "Set All Currents" button.
-        col0_widget = QtWidgets.QWidget()
-        col0_layout = QtWidgets.QHBoxLayout(col0_widget)
-        col0_layout.setContentsMargins(0,0,0,0)
-        col0_layout.setSpacing(5)
-        self.global_label = QtWidgets.QLabel("Global mA:")
-        self.global_label.setStyleSheet("font: 10pt 'Segoe UI'; color: #333;")
-        col0_layout.addWidget(self.global_label)
+        btn_style = (
+            "background-color: #0078D7; color: white; border: none;"
+            " border-radius: 4px; padding: 6px; font: 10pt 'Segoe UI'; font-weight: 600;"
+        )
+        # Column 0: Global mA
+        col0 = QtWidgets.QWidget()
+        l0 = QtWidgets.QHBoxLayout(col0)
+        l0.setContentsMargins(0, 0, 0, 0)
+        l0.setSpacing(5)
+        lbl0 = QtWidgets.QLabel("Global mA:")
+        lbl0.setStyleSheet("font: 10pt 'Segoe UI'; color: #333;")
+        l0.addWidget(lbl0)
         self.all_current_input = QtWidgets.QLineEdit()
         self.all_current_input.setPlaceholderText("Enter global mA")
-        # Let the input expand to fill extra space:
-        self.all_current_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        self.all_current_input.setStyleSheet("background-color: #fff; color: #333; border: 1px solid #ccc; border-radius: 4px; padding: 4px;")
-        col0_layout.addWidget(self.all_current_input)
-        self.set_all_button = QtWidgets.QPushButton("Set All Currents")
-        self.set_all_button.setStyleSheet(btn_style)
-        self.set_all_button.clicked.connect(self.set_all_currents)
-        col0_layout.addWidget(self.set_all_button)
-        bottom_layout.addWidget(col0_widget, 0, 0)
-
-        # Column 1: "Get All Readings"
-        col1_widget = QtWidgets.QWidget()
-        col1_layout = QtWidgets.QHBoxLayout(col1_widget)
-        col1_layout.setContentsMargins(0,0,0,0)
-        self.get_all_button = QtWidgets.QPushButton("Get All Readings")
-        self.get_all_button.setStyleSheet(btn_style)
-        self.get_all_button.clicked.connect(self.get_all_readings)
-        col1_layout.addWidget(self.get_all_button)
-        bottom_layout.addWidget(col1_widget, 0, 1)
-
-        # Column 2: "Functions"
-        col2_widget = QtWidgets.QWidget()
-        col2_layout = QtWidgets.QHBoxLayout(col2_widget)
-        col2_layout.setContentsMargins(0,0,0,0)
-        self.functions_button = QtWidgets.QPushButton("Functions")
-        self.functions_button.setStyleSheet(btn_style)
-        self.functions_button.clicked.connect(self.open_functions_window)
-        col2_layout.addWidget(self.functions_button)
-        bottom_layout.addWidget(col2_widget, 0, 2)
-
-        # Column 3: "Exit"
-        col3_widget = QtWidgets.QWidget()
-        col3_layout = QtWidgets.QHBoxLayout(col3_widget)
-        col3_layout.setContentsMargins(0,0,0,0)
-        self.exit_button = QtWidgets.QPushButton("Exit")
-        self.exit_button.setStyleSheet(btn_style)
-        self.exit_button.clicked.connect(QtWidgets.qApp.quit)
-        col3_layout.addWidget(self.exit_button)
-        bottom_layout.addWidget(col3_widget, 0, 3)
+        self.all_current_input.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        l0.addWidget(self.all_current_input)
+        btn0 = QtWidgets.QPushButton("Set All Currents")
+        btn0.setStyleSheet(btn_style)
+        btn0.clicked.connect(self.set_all_currents)
+        l0.addWidget(btn0)
+        bottom_layout.addWidget(col0, 0, 0)
+        # Column 1: Get All
+        col1 = QtWidgets.QWidget()
+        l1 = QtWidgets.QHBoxLayout(col1)
+        l1.setContentsMargins(0, 0, 0, 0)
+        btn1 = QtWidgets.QPushButton("Get All Readings")
+        btn1.setStyleSheet(btn_style)
+        btn1.clicked.connect(self.get_all_readings)
+        l1.addWidget(btn1)
+        bottom_layout.addWidget(col1, 0, 1)
+        # Column 2: Functions
+        col2 = QtWidgets.QWidget()
+        l2 = QtWidgets.QHBoxLayout(col2)
+        l2.setContentsMargins(0, 0, 0, 0)
+        btn2 = QtWidgets.QPushButton("Functions")
+        btn2.setStyleSheet(btn_style)
+        btn2.clicked.connect(self.open_functions_window)
+        l2.addWidget(btn2)
+        bottom_layout.addWidget(col2, 0, 2)
+        # Column 3: Exit
+        col3 = QtWidgets.QWidget()
+        l3 = QtWidgets.QHBoxLayout(col3)
+        l3.setContentsMargins(0, 0, 0, 0)
+        btn3 = QtWidgets.QPushButton("Exit")
+        btn3.setStyleSheet(btn_style)
+        btn3.clicked.connect(QtWidgets.qApp.quit)
+        l3.addWidget(btn3)
+        bottom_layout.addWidget(col3, 0, 3)
 
         self.main_layout.addWidget(self.bottom_widget, 0)
 
-        # Timer to update readings every second.
+        # refresh timer
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.update_all_channel_displays)
         self.timer.start(1000)
+
+        # go fullscreen
+        self.showFullScreen()
 
     def update_all_channel_displays(self):
         for card in self.channel_cards:
             card.update_current_display()
 
     def set_all_currents(self):
-        """Set all channels to the global mA value."""
-        text = self.all_current_input.text()
         try:
-            value = float(text)
+            val = float(self.all_current_input.text())
+            self.driver.i[:] = val
             for card in self.channel_cards:
-                self.driver.set_current(card.channel, value)
                 card.update_current_display()
                 card.setStyleSheet(card.success_card_style)
                 QtCore.QTimer.singleShot(800, lambda c=card: c.setStyleSheet(c.base_card_style))
@@ -251,33 +229,26 @@ class MainWindow(QtWidgets.QMainWindow):
             card.get_reading()
 
     def responsive_layout(self):
-        if not hasattr(self, "grid_layout"):
+        if not hasattr(self, 'grid_layout'):
             return
-        width = self.width()
-        if width > 1800:
-            columns = 10
-        elif width > 1200:
-            columns = 8
-        else:
-            columns = 6
-
+        w = self.width()
+        cols = 10 if w > 1800 else 8 if w > 1200 else 6
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             if item.widget():
                 item.widget().setParent(None)
-        for index, card in enumerate(self.channel_cards):
-            row = index // columns
-            col = index % columns
-            self.grid_layout.addWidget(card, row, col)
+        for idx, card in enumerate(self.channel_cards):
+            self.grid_layout.addWidget(card, idx // cols, idx % cols)
 
     def resizeEvent(self, event):
-        if hasattr(self, "grid_layout"):
+        if hasattr(self, 'grid_layout'):
             self.responsive_layout()
         super().resizeEvent(event)
 
     def open_functions_window(self):
         self.func_window = FunctionsWindow(self.driver, self)
         self.func_window.show()
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
@@ -286,8 +257,6 @@ def main():
     window.show()
     sys.exit(app.exec_())
 
+
 if __name__ == '__main__':
     main()
-
-
-## Ramp and toggle to see the waveform, plotting the reading as it's reaching desired current.
